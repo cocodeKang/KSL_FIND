@@ -3817,19 +3817,35 @@ function prevClip() {
         closeSearchOverlay();
       }
     });
-  // ===== 자동재생 기능 (3모드) =====
+// ===== 자동재생 기능 (4모드) =====
 // 0: OFF(끝나면 멈춤)
-// 1: ON(끝나면 다음 영상 자동 재생)
+// 1: ON(끝나면 3초 뒤 다음 영상 자동 재생) + 총 10개(첫 영상 포함) 재생 후 정지
 // 2: LOOP(끝나면 같은 영상 처음부터 반복 재생)
-    
+// 3: 넘기면 재생(넘길 때만 자동재생)
+
+const AUTO_PLAY_LIMIT = 10;       // ✅ 총 10개(첫 영상 포함)
+const AUTO_PLAY_DELAY_MS = 3000;  // ✅ 3초 뒤 다음 영상
+
 let autoPlayMode = 0;
+
+// ✅ "첫 영상 포함 10개" 카운터
+let autoPlayCount = 0;   // 1부터 시작(ON 켤 때 현재 영상이 1개로 카운트)
+let autoNextTimer = null;
+
+function clearAutoNextTimer() {
+  if (autoNextTimer) {
+    clearTimeout(autoNextTimer);
+    autoNextTimer = null;
+  }
+}
 
 function updateAutoPlayUI() {
   if (autoPlayMode === 0) {
     autoNextBtn.textContent = "자동재생: OFF";
     autoNextBtn.classList.remove("on");
   } else if (autoPlayMode === 1) {
-    autoNextBtn.textContent = "자동재생: ON";
+    // ✅ 카운트 표시(원치 않으면 괄호 부분 삭제 가능)
+    autoNextBtn.textContent = `자동재생: ON (${autoPlayCount}/${AUTO_PLAY_LIMIT})`;
     autoNextBtn.classList.add("on");
   } else if (autoPlayMode === 2) {
     autoNextBtn.textContent = "자동재생: 반복";
@@ -3840,24 +3856,66 @@ function updateAutoPlayUI() {
   }
 }
 
-
-// 버튼 클릭할 때 0 → 1 → 2 → 0 순환
+// 버튼 클릭할 때 0 → 1 → 2 → 3 → 0 순환
 autoNextBtn.addEventListener("click", () => {
+  clearAutoNextTimer();
+
   autoPlayMode = (autoPlayMode + 1) % 4;
+
+  // ✅ ON(모드 1)으로 켤 때: "현재 영상"을 1개로 카운트해서 시작
+  if (autoPlayMode === 1) {
+    autoPlayCount = 1;
+  } else {
+    autoPlayCount = 0;
+  }
+
   updateAutoPlayUI();
 });
 
 // 영상이 끝났을 때 동작
 videoEl.addEventListener("ended", () => {
+  // 1) ON: 3초 뒤 다음 영상 + 총 10개(첫 영상 포함) 재생 후 정지
   if (autoPlayMode === 1) {
-    const nextIndex = (currentIndex + 1) % clipsCurrent.length;
-    loadClip(nextIndex, { autoplay: true });
-  } else if (autoPlayMode === 2) {
+    // ✅ 이미 10개 채웠으면 OFF로 전환하고 멈춤
+    if (autoPlayCount >= AUTO_PLAY_LIMIT) {
+      autoPlayMode = 0;
+      clearAutoNextTimer();
+      updateAutoPlayUI();
+      return;
+    }
+
+    clearAutoNextTimer();
+    autoNextTimer = setTimeout(() => {
+      // 타이머 기다리는 동안 모드가 바뀌었을 수 있으니 재확인
+      if (autoPlayMode !== 1) return;
+
+      // 다음 영상으로 이동하면서 "재생된 영상 수" +1
+      const nextIndex = (currentIndex + 1) % clipsCurrent.length;
+      autoPlayCount += 1;
+
+      // ✅ 10번째를 넘기려는 순간이면(=11번째), OFF로 전환하고 중단
+      if (autoPlayCount > AUTO_PLAY_LIMIT) {
+        autoPlayMode = 0;
+        clearAutoNextTimer();
+        updateAutoPlayUI();
+        return;
+      }
+
+      updateAutoPlayUI();
+      loadClip(nextIndex, { autoplay: true });
+    }, AUTO_PLAY_DELAY_MS);
+
+    return;
+  }
+
+  // 2) LOOP: 같은 영상 반복
+  if (autoPlayMode === 2) {
     videoEl.currentTime = 0;
     videoEl.play().catch(() => {});
-  } else {
-    // 0(OFF), 3(넘기면 재생): 끝나면 멈춤
+    return;
   }
+
+  // 0(OFF), 3(넘기면 재생): 끝나면 멈춤
 });
 
 
